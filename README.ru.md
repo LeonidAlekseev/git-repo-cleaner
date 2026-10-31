@@ -1,0 +1,490 @@
+# Git Repo Cleaner
+
+[🇬🇧 English](README.md) | **🇷🇺 Русский**
+
+[![CI](https://github.com/LeonidAlekseev/git-repo-cleaner/actions/workflows/ci.yml/badge.svg)](https://github.com/LeonidAlekseev/git-repo-cleaner/actions/workflows/ci.yml)
+[![JSR](https://jsr.io/badges/@leonidalekseev/git-repo-cleaner)](https://jsr.io/@leonidalekseev/git-repo-cleaner)
+[![GitHub release](https://img.shields.io/github/v/release/LeonidAlekseev/git-repo-cleaner)](https://github.com/LeonidAlekseev/git-repo-cleaner/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](https://github.com/LeonidAlekseev/git-repo-cleaner/releases)
+[![Deno](https://img.shields.io/badge/deno-2.x-black?logo=deno)](https://deno.com)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+Инструмент на TypeScript/Deno, который вычищает из git-репозитория следы AI-ассистентов — Claude Code, Cursor, GitHub
+Copilot, Codex, Gemini, Aider, Windsurf, OpenSpec, AGENTS.md — из файлов, сообщений коммитов и авторов, по всей истории,
+для любых веток, в ту же ветку, в новую ветку или в другой репозиторий.
+
+> [!WARNING]
+> Инструмент переписывает историю git. Перезаписываемые ветки автоматически сохраняются в бэкап, но перед первым
+> запуском на важном репозитории сделайте пробный запуск (`--dry-run`) и убедитесь, что у вас есть копия.
+
+## Оглавление
+
+- [Обзор](#обзор)
+- [Возможности](#возможности)
+- [Что чистится](#что-чистится)
+- [Установка](#установка)
+- [Быстрый старт](#быстрый-старт)
+- [Использование](#использование)
+- [Как это работает](#как-это-работает)
+- [Безопасность](#безопасность)
+- [Сравнение с claude-cleaner](#сравнение-с-claude-cleaner)
+- [Решение проблем](#решение-проблем)
+- [Частые вопросы](#частые-вопросы)
+- [Разработка](#разработка)
+- [Благодарности](#благодарности)
+- [Лицензия](#лицензия)
+
+## Обзор
+
+Git Repo Cleaner клонирует репозиторий во временную mirror-копию, оставляет в ней только выбранные ветки, показывает,
+что именно изменится, переписывает историю через [git-filter-repo](https://github.com/newren/git-filter-repo), проверяет
+результат и только после этого отправляет очищенные ветки туда, куда вы указали. Исходный репозиторий до последнего шага
+не меняется.
+
+Все вопросы задаются интерактивно — списки с чекбоксами прямо в терминале — и каждый из них можно закрыть флагом для
+скриптов и CI. Интерфейс программы на английском.
+
+## Возможности
+
+- ☑️ **Чекбоксы в терминале**: выбор веток, артефактов и действий стрелками и пробелом.
+- 🌿 **Любые ветки**: одна, несколько или все сразу.
+- 🎯 **Любая цель**: в те же ветки, в новые ветки (`main` → `main-clean`), в другой локальный или удалённый репозиторий,
+  в режиме зеркала с `--prune`.
+- 🧩 **11 групп артефактов**: Claude Code, Anthropic, OpenSpec, AGENTS.md, Serena, Cursor, Copilot, Codex, Gemini,
+  Aider, Windsurf — плюс свои regex.
+- ✂️ **Точная чистка трейлеров**: удаляются только строки-атрибуции в блоке трейлеров; текст коммита, `Signed-off-by` и
+  соавторы-люди остаются.
+- 👤 **Авторы-боты**: коммиты от `Claude`, `Copilot`, `Cursor Agent`, `… (aider)` переписываются на ваше имя.
+- 🔎 **Предпросмотр**: какие файлы удалятся, какие трейлеры и авторы изменятся, какие ветки перезапишутся.
+- 🧪 **Пробный запуск**: полная очистка временной копии без изменения цели.
+- 💾 **Бэкап по умолчанию**: всё, что будет перезаписано или удалено, сохраняется в git bundle.
+- ✅ **Проверка чистоты**: после очистки история проверяется тем же кодом, что строил план; при остатках отправка
+  отменяется.
+- 🔒 **Сохранение SHA**: коммиты без артефактов не меняются.
+- 🎨 **Аккуратный вывод**: спиннеры, выровненные секции, цвета (учитывает `NO_COLOR`), без шума git.
+- 📦 **Один бинарник**: сборки для Linux, macOS и Windows.
+
+## Что чистится
+
+### Артефакты (`--only`)
+
+| Ключ        | По умолч. | Файлы и папки                                                                                                                      | Трейлеры и авторы                                                                |
+| ----------- | :-------: | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `claude`    |    ✅     | `.claude/`, `CLAUDE.md`, `CLAUDE.local.md`, `claudedocs/`, `.vscode/claude.json`, `.clauderc`, `.claudeignore`, `claude*.tmp/.log` | `Co-Authored-By: Claude …`, `🤖 Generated with [Claude Code](…)`, автор `Claude` |
+| `anthropic` |    ✅     | —                                                                                                                                  | любой трейлер и автор с почтой `@anthropic.com`                                  |
+| `openspec`  |    ✅     | `openspec/`                                                                                                                        | —                                                                                |
+| `agents`    |    ✅     | `AGENTS.md`, `AGENT.md`, `AGENTS.*.md`                                                                                             | —                                                                                |
+| `serena`    |    ✅     | `.serena/`                                                                                                                         | —                                                                                |
+| `cursor`    |           | `.cursor/`, `.cursorrules`, `.cursorignore`, `.cursorindexingignore`                                                               | `Co-authored-by: Cursor Agent …`, автор `Cursor Agent`                           |
+| `copilot`   |           | `.github/copilot-instructions.md`, `.github/prompts/*.prompt.md`, `.github/instructions/*.instructions.md`                         | `Co-authored-by: Copilot …`, автор `Copilot`                                     |
+| `codex`     |           | `.codex/`                                                                                                                          | `Co-authored-by: Codex …`, автор `Codex`                                         |
+| `gemini`    |           | `GEMINI.md`, `.gemini/`                                                                                                            | `Co-authored-by: gemini-code-assist …`                                           |
+| `aider`     |           | `.aider*` (`.aider.chat.history.md`, `.aider.conf.yml`, `.aider.tags.cache.v3/` …)                                                 | `Co-authored-by: aider …`, `(aider)` в имени автора                              |
+| `windsurf`  |           | `.windsurf/`, `.windsurfrules`                                                                                                     | —                                                                                |
+
+### Действия (`--actions`)
+
+| Ключ       | По умолч. | Что делает                                                                                              |
+| ---------- | :-------: | ------------------------------------------------------------------------------------------------------- |
+| `files`    |    ✅     | удаляет файлы и папки артефактов по точным именам из всей истории                                       |
+| `trailers` |    ✅     | удаляет строки-атрибуции из блока трейлеров в конце сообщения                                           |
+| `authors`  |    ✅     | заменяет авторов и коммиттеров-ботов на `--author-name`/`--author-email` (по умолчанию `git config`)    |
+| `extended` |           | широкие шаблоны путей: `claude-*`, `claude_*`, `claude.*`, `.claude*`, `.mcp.json`, `*openspec*`        |
+| `mentions` |           | вырезает упоминания (`claude`, `anthropic`, `openspec`, `agents.md`, свои `--word`) из текста сообщений |
+| `content`  |           | вырезает те же упоминания из содержимого текстовых файлов — **может сломать код**, включайте осознанно  |
+
+### Точное сопоставление путей
+
+Стандартные шаблоны совпадают с точным именем файла или папки в любом месте дерева:
+
+```
+Шаблон: .claude/
+✅ .claude/settings.json, app/.claude/commands/x.md
+❌ .claude2/x, my.claude/x
+
+Шаблон: CLAUDE.md
+✅ CLAUDE.md, docs/CLAUDE.md, CLAUDE.local.md
+❌ MY-CLAUDE.md, CLAUDE.md.backup, docs/claude-guide.md
+
+Шаблон: AGENTS.md
+✅ AGENTS.md, sub/AGENT.md, AGENTS.override.md
+❌ MY-AGENTS.md, agents/index.ts
+```
+
+`src/claude_client.ts` по умолчанию остаётся. Удалить и его можно действием `extended`.
+
+### Трейлеры
+
+Трейлер удаляется, только если строка **целиком** совпадает с шаблоном атрибуции **и** стоит в блоке трейлеров в конце
+сообщения:
+
+```diff
+  Add Claude client
+
+  Uses the Claude API for summaries.        ← текст коммита остаётся
+-
+- 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+-
+  Signed-off-by: Jane Doe <jane@example.com>
+- Co-Authored-By: Claude <noreply@anthropic.com>
+  Co-authored-by: Bob <bob@example.com>     ← соавтор-человек остаётся
+```
+
+Сообщения, где ничего не нашлось, не меняются ни на байт. Если от сообщения ничего не осталось, оно заменяется на
+`Update files`, чтобы не появлялись коммиты с пустым сообщением.
+
+## Установка
+
+### Требования
+
+- **git**;
+- **[git-filter-repo](https://github.com/newren/git-filter-repo)** — движок переписывания истории:
+  ```sh
+  pipx install git-filter-repo    # или: brew install git-filter-repo / apt install git-filter-repo
+  ```
+- **[Deno](https://deno.com) 2+** — только при запуске из исходников или через JSR; бинарнику Deno не нужен.
+
+### Установить Git Repo Cleaner
+
+```sh
+# Вариант 1: готовый бинарник со страницы релизов
+#   https://github.com/LeonidAlekseev/git-repo-cleaner/releases
+#   положите его в PATH под именем git-repo-cleaner
+
+# Вариант 2: из JSR
+deno install -g -n git-repo-cleaner --allow-run=git --allow-read --allow-write --allow-env \
+  jsr:@leonidalekseev/git-repo-cleaner
+
+# Вариант 3: из исходников
+git clone https://github.com/LeonidAlekseev/git-repo-cleaner
+cd git-repo-cleaner
+deno task compile                 # → dist/git-repo-cleaner
+# или запускать без сборки:
+./src/main.ts --help
+```
+
+> [!TIP]
+> Бинарник с именем `git-repo-cleaner` в `PATH` git подхватывает как подкоманду: `git repo-cleaner --help`.
+
+> [!NOTE]
+> По умолчанию Deno не устанавливает версии, опубликованные меньше 24 часов назад. Если свежий релиз не ставится,
+> добавьте к команде установки `--minimum-dependency-age=0`.
+
+## Быстрый старт
+
+```sh
+cd my-project
+
+# 1. Посмотреть, что будет очищено, ничего не меняя
+git-repo-cleaner --dry-run
+
+# 2. Запустить интерактивно и ответить на вопросы
+git-repo-cleaner
+```
+
+Пример вывода:
+
+```
+git-repo-cleaner v0.1.1
+
+✔ Cloned /home/jane/my-app · 1 branch 0.0s
+✔ Inspected target refs 0.0s
+✔ Analyzed history 0.0s
+
+Found in history · 2 commits
+  Files         3
+                .claude/settings.json
+                AGENTS.md
+                CLAUDE.md
+  Trailers      2
+                🤖 Generated with [Claude Code](https://claude.com/claude-code)  ×1
+                Co-Authored-By: Claude <noreply@anthropic.com>  ×1
+  Authors       1
+                Claude <noreply@anthropic.com>
+  Commits       1 with a new message or author
+
+Plan
+  Source        /home/jane/my-app
+  Target        same repository
+  Branches      main → main-clean
+  Tags          no
+  Artifacts     claude, anthropic, openspec, agents, serena
+  Actions       files, trailers, authors
+  Author        Jane Doe <jane@example.com>
+  Backup        not needed, nothing is overwritten
+  Mode          dry run — the target stays untouched
+
+✔ Rewrote history 0.2s
+✔ Verified the result · no artifacts left 0.0s
+
+◆ Dry run complete — the target was not changed
+  Cleaned copy  /tmp/git-repo-cleaner-1a2b3c/repo.git
+  Inspect       git -C /tmp/git-repo-cleaner-1a2b3c/repo.git log --all --stat
+```
+
+## Использование
+
+### Интерактивный режим
+
+```sh
+git-repo-cleaner                                   # текущий репозиторий
+git-repo-cleaner ../other-project                  # локальный путь
+git-repo-cleaner https://github.com/me/private     # удалённый репозиторий
+```
+
+Вопросы по порядку (стрелки — перемещение, Пробел — отметить, `a` — все/ничего, Enter — дальше, `q` — выход):
+
+1. какие ветки очистить (`Which branches to clean?`);
+2. в новую ветку (`<ветка>-clean` или своё имя/суффикс) или в те же ветки с перезаписью;
+3. в текущий репозиторий, его `origin` или другой репозиторий (URL или путь; путь создаётся);
+4. какие артефакты чистить;
+5. что делать с найденным;
+6. свои пути и слова (regex);
+7. предпросмотр и подтверждение: `y` — выполнить, `d` — пробный запуск, `N` — отмена.
+
+### Параметры командной строки
+
+```
+Usage: git-repo-cleaner [source] [options]
+  source                  repository path or URL (default: current repository)
+
+Branches:
+  -b, --branch NAME       branch to clean (repeatable)
+  --all                   all branches
+Branch names:
+  --in-place              keep branch names (rewrite history)
+  --suffix=SUFFIX         new branches named <branch><suffix> (default: -clean)
+  --to NAME               new branch name (single branch only)
+Destination:
+  --same-repo             push to the source repository
+  --target URL|PATH       push to another repository (a missing path is created)
+What to clean:
+  --only KEYS             comma-separated artifacts (default: claude,anthropic,openspec,agents,serena)
+  --actions KEYS          comma-separated actions (default: files,trailers,authors)
+  --word REGEX            extra mention regex for mentions/content (repeatable)
+  --path REGEX            extra file path regex (repeatable)
+  --author-name NAME      name for rewritten commits (default: git config user.name)
+  --author-email EMAIL    email for rewritten commits (default: git config user.email)
+Other:
+  --no-tags               do not transfer tags
+  --prune                 delete target branches missing from the source (requires --all)
+  --dry-run               preview and clean a temporary copy; leave the target untouched
+  --no-backup             skip the backup of overwritten target refs (backup is on by default)
+  -v, --verbose           show full lists
+  -y, --yes               do not ask for confirmation
+  -V, --version           print version
+  -h, --help              show this help
+```
+
+Без терминала (CI, скрипты) недостающие ответы нужно передать флагами, иначе инструмент остановится и подскажет, какой
+флаг нужен. Суффикс, начинающийся с `-`, передавайте через `=`: `--suffix=-clean`.
+
+### Основные примеры
+
+```sh
+# одна ветка → новая ветка в том же репозитории
+git-repo-cleaner -b main --to main-public --same-repo
+
+# все ветки → ветки с суффиксом, без вопросов
+git-repo-cleaner --all --suffix=-clean --same-repo -y
+
+# одна ветка → перезапись на месте (с бэкапом)
+git-repo-cleaner -b feature/login --in-place --same-repo
+```
+
+### Выборочная очистка
+
+```sh
+# только файлы, без сообщений и авторов
+git-repo-cleaner --actions files
+
+# только трейлеры
+git-repo-cleaner --actions trailers
+
+# Claude и Cursor, плюс упоминания в тексте сообщений
+git-repo-cleaner --only claude,cursor --actions files,trailers,authors,mentions
+
+# всё, что известно, включая широкие шаблоны путей
+git-repo-cleaner --only claude,anthropic,openspec,agents,serena,cursor,copilot,codex,gemini,aider,windsurf \
+  --actions files,extended,trailers,authors --dry-run -v
+```
+
+### Свои шаблоны
+
+```sh
+# удалить папку notes-ai/ и вырезать кодовое имя проекта из сообщений
+git-repo-cleaner --path '(^|/)notes-ai(/|$)' --word 'project-x' --actions files,trailers,mentions
+```
+
+### Публикация приватного репозитория
+
+```sh
+# зеркало: все ветки и теги, удалённые в источнике ветки удаляются и в цели
+git-repo-cleaner https://github.com/me/private \
+  --target https://github.com/me/public \
+  --all --in-place --prune -y \
+  --author-name "Jane Doe" --author-email jane@users.noreply.github.com
+```
+
+## Как это работает
+
+1. **🔍 Проверка зависимостей** — git и git-filter-repo доступны.
+2. **📥 Mirror-копия** — источник клонируется во временный каталог, дальше вся работа идёт там.
+3. **🧭 Вопросы и проверки** — ветки, цель, артефакты, действия; несовместимые флаги, конфликты имён, `--prune` без
+   `--all` отсекаются до каких-либо изменений.
+4. **📸 Снимок цели** — ветки и теги цели копируются в служебные ссылки, чтобы знать, что будет перезаписано.
+5. **🔎 План** — по истории выбранных веток строится список удаляемых файлов и изменений каждого коммита (сообщение,
+   автор, коммиттер); это и есть предпросмотр.
+6. **✋ Подтверждение** — или пробный запуск.
+7. **💾 Бэкап** — перезаписываемые и удаляемые ссылки цели сохраняются в git bundle.
+8. **🧹 Очистка** — git-filter-repo удаляет файлы, при `content` заменяет текст и применяет план коммитов по исходным
+   SHA.
+9. **✅ Проверка** — план строится заново по результату; если в нём остались изменения или файлы артефактов, отправка
+   отменяется, копия остаётся для разбора.
+10. **🚀 Доставка** — `git push --force` в удалённую цель или `git fetch` в локальную.
+
+Решения о сообщениях и авторах принимаются в одном месте (`src/message.ts`, `src/history.ts`): предпросмотр,
+переписывание и проверка используют один и тот же код, поэтому предпросмотр совпадает с результатом.
+
+## Безопасность
+
+### Бэкап по умолчанию
+
+Перед отправкой всё, что в цели будет перезаписано или удалено — ветки, теги, ветки под `--prune`, — сохраняется в
+`~/.cache/git-repo-cleaner/<repo>-<время>.bundle`. Если перезаписывать нечего (новая ветка, новый репозиторий), бэкап не
+создаётся. Отключить: `--no-backup`.
+
+```sh
+# восстановить ветки из бэкапа в backup/*
+git fetch ~/.cache/git-repo-cleaner/my-app-20261031-120000.bundle 'refs/backup/heads/*:refs/heads/backup/*'
+```
+
+### Пробный запуск
+
+`--dry-run` (или ответ `d` на подтверждение) показывает предпросмотр, выполняет очистку и проверку на временной копии,
+но не меняет цель и не создаёт бэкап. Путь к очищенной копии печатается — её можно изучить:
+
+```sh
+git -C /tmp/git-repo-cleaner-xxxx/repo.git log --all --stat
+```
+
+### Защитные проверки
+
+- **Исходник не меняется до последнего шага**: вся работа идёт во временной копии.
+- **Открытая ветка**: локальная ветка, открытая в текущем worktree, обновляется только при чистом рабочем дереве (затем
+  `git reset --hard`); ветка, открытая в другом worktree, не трогается.
+- **Теги** переносятся только при очистке всех веток в те же имена или в другой репозиторий — переписанные теги не
+  перезапишут оригинальные рядом с новыми ветками.
+- **`--prune`** разрешён только вместе с `--all`, удаляемые ветки показываются в плане и попадают в бэкап.
+- **Без терминала** инструмент не запускается без `--yes` или `--dry-run`.
+
+## Сравнение с claude-cleaner
+
+Git Repo Cleaner вдохновлён [claude-cleaner](https://github.com/tylerbutler/claude-cleaner) и перенял у него точную
+чистку трейлеров, сопоставление по точным именам и подход к предпросмотру. Отличия:
+
+|                              | claude-cleaner                             | Git Repo Cleaner                                                                                |
+| ---------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Инструменты                  | Claude                                     | Claude, Anthropic, OpenSpec, AGENTS.md, Serena, Cursor, Copilot, Codex, Gemini, Aider, Windsurf |
+| Выбор веток                  | файлы — все ссылки, сообщения — одна ветка | одна, несколько или все ветки, одинаково для файлов и сообщений                                 |
+| Куда класть результат        | на место                                   | на место, в новые ветки, в другой локальный или удалённый репозиторий, зеркало с `--prune`      |
+| Интерфейс                    | флаги                                      | чекбоксы в терминале + флаги                                                                    |
+| Авторы-боты                  | —                                          | переписываются на ваше имя                                                                      |
+| Упоминания в тексте и файлах | —                                          | по запросу (`mentions`, `content`)                                                              |
+| Бэкап                        | bare-клон всего репозитория + ветка        | bundle только перезаписываемых и удаляемых ссылок цели                                          |
+| Изоляция                     | переписывает рабочий репозиторий           | временная mirror-копия, цель меняется после проверки                                            |
+| Проверка результата          | есть                                       | тот же код, что строил план; при остатках отправки нет                                          |
+| `CLAUDE.md`                  | сохраняется по умолчанию                   | удаляется по умолчанию (можно снять галочку)                                                    |
+| Движок                       | `git filter-branch` (нужен только git)     | `git-filter-repo` (нужен Python, но многократно быстрее)                                        |
+
+## Решение проблем
+
+#### `git-filter-repo is required`
+
+```sh
+pipx install git-filter-repo        # или brew install git-filter-repo / apt install git-filter-repo
+git filter-repo --version
+```
+
+#### `No terminal to ask — pass …`
+
+Запуск без интерактивного терминала (CI, пайп). Передайте недостающий ответ флагом, указанным в сообщении, например
+`--all --in-place --same-repo -y`.
+
+#### `Branch … is checked out in … with uncommitted changes`
+
+Перезаписываемая ветка открыта в рабочей копии и в ней есть изменения. Закоммитьте их или уберите
+(`git stash push -m before-clean`) и запустите снова.
+
+#### `Branch … is checked out in another worktree`
+
+Переключите тот worktree на другую ветку или очистите в новую ветку (`--suffix=-clean`).
+
+#### `Artifacts are still present, nothing was pushed`
+
+После очистки в истории остались артефакты — чаще всего из-за своего `--word`, который после вырезания снова
+складывается в совпадение. Путь к копии для разбора печатается в сообщении; цель не изменена.
+
+#### `git push failed`
+
+Защищённая ветка или нет прав на force-push. Снимите защиту на время или очистите в новую ветку.
+
+## Частые вопросы
+
+**Изменятся ли SHA коммитов?** Да — у коммитов, где что-то удалено, и у всех их потомков. Коммиты до первого изменения
+сохраняют SHA.
+
+**Нужно ли что-то делать коллегам?** После перезаписи опубликованных веток — заново склонировать или
+`git fetch && git reset --hard origin/<ветка>`.
+
+**Удалятся ли файлы из старых коммитов на GitHub?** Из веток — да. Но старые коммиты могут оставаться доступны по SHA, в
+форках и закрытых pull request'ах. Для секретов этого недостаточно — отзовите их.
+
+**Почему `content` выключен по умолчанию?** Он заменяет слова во всех текстовых файлах, включая код: `import anthropic`
+превратится в `import`. Включайте только для документации и после пробного запуска.
+
+**Чистятся ли бинарные файлы и аннотированные теги?** Нет: git-filter-repo не правит бинарные файлы, а сообщения
+аннотированных тегов не обрабатываются.
+
+**Почему CLAUDE.md удаляется по умолчанию?** Задача инструмента — убрать следы AI-инструментов полностью. Чтобы
+сохранить файлы, снимите действие `files` или артефакт `claude`.
+
+**Какой синтаксис у своих regex?** Без учёта регистра, применяются к полному пути (`--path`) или строке (`--word`).
+Шаблоны путей и `--word` для `content` исполняет git-filter-repo, поэтому они должны работать и в JavaScript, и в Python
+`re` — обычный синтаксис (`\s`, `(a|b)`, `^`, `$`, `[^/]`) подходит.
+
+## Разработка
+
+```sh
+deno task check     # fmt, lint, проверка типов
+deno task test      # unit-тесты + сквозные тесты на временных репозиториях (нужен git-filter-repo)
+deno task start     # запуск из исходников
+deno task compile   # сборка dist/git-repo-cleaner
+```
+
+Структура:
+
+```
+src/main.ts        CLI: вопросы, план, бэкап, очистка, доставка
+src/artifacts.ts   артефакты, действия, сборка правил
+src/message.ts     очистка сообщения коммита (блок трейлеров, упоминания)
+src/history.ts     чтение истории, план изменений коммитов, callback для git-filter-repo
+src/menu.ts        чекбоксы и вопросы в терминале
+src/ui.ts          вывод: цвета, секции, спиннеры
+src/git.ts         запуск git
+tests/             unit- и сквозные тесты
+```
+
+Релиз: поднять `version` в `deno.json`, затем `git tag v<version> && git push origin v<version>`. CI соберёт бинарники
+для Linux, macOS и Windows в GitHub Release и опубликует пакет в JSR.
+
+## Благодарности
+
+- [claude-cleaner](https://github.com/tylerbutler/claude-cleaner) от Tyler Butler — идея, разбор блока трейлеров и
+  подход к безопасным шаблонам.
+- [git-filter-repo](https://github.com/newren/git-filter-repo) — быстрый и надёжный движок переписывания истории.
+- [Deno](https://deno.com) и [@std](https://jsr.io/@std).
+
+## Лицензия
+
+[MIT](LICENSE).

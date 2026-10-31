@@ -1,6 +1,6 @@
 /** Сквозные тесты CLI на временных репозиториях. Нужны git и git-filter-repo. */
 
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertMatch, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 
 const MAIN = new URL("../src/main.ts", import.meta.url).pathname;
@@ -111,9 +111,9 @@ Deno.test({
     const before = git(repo, ["for-each-ref"]);
     const { code, output } = await run(repo, cache, ["--all", "--in-place", "--same-repo", "--dry-run"]);
     assertEquals(code, 0, output);
-    assertStringIncludes(output, "файлы к удалению: 3");
+    assertMatch(output, /Files\s+3/);
     assertStringIncludes(output, "Claude <noreply@anthropic.com>");
-    assertStringIncludes(output, "✅ Dry-run");
+    assertStringIncludes(output, "Dry run complete");
     assertEquals(git(repo, ["for-each-ref"]), before);
     assertEquals(bundles(cache), []);
     Deno.removeSync(dir, { recursive: true });
@@ -155,7 +155,7 @@ Deno.test({
       "-y",
     ]);
     assertEquals(code, 0, output);
-    assertStringIncludes(output, "удалятся: old");
+    assertMatch(output, /Prune\s+old/);
     assertEquals(git(pub, ["for-each-ref", "--format=%(refname)"]), "refs/heads/feat\nrefs/heads/main\nrefs/tags/v1");
     assertStringIncludes(git(repo, ["bundle", "list-heads", bundles(cache)[0]]), "refs/backup/heads/old");
     Deno.removeSync(dir, { recursive: true });
@@ -194,7 +194,7 @@ Deno.test({
     const { dir, repo, cache } = fixture();
     const { code, output } = await run(repo, cache, ["--all", "--in-place", "--same-repo"]);
     assertEquals(code, 1);
-    assertStringIncludes(output, "--yes или --dry-run");
+    assertStringIncludes(output, "--yes or --dry-run");
     Deno.removeSync(dir, { recursive: true });
   },
 });

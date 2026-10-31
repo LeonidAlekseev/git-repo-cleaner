@@ -1,36 +1,35 @@
 /** Интерактивные вопросы в терминале: списки с чекбоксами и текстовый ввод. */
 
-export function cancel(): never {
-  console.log("Отменено.");
-  Deno.exit(1);
-}
-
-function write(s: string) {
-  let bytes = new TextEncoder().encode(s);
-  while (bytes.length) bytes = bytes.subarray(Deno.stdout.writeSync(bytes));
-}
+import { bold, cancel, cyan, dim, green, terminalSize, write } from "./ui.ts";
 
 /** Список в терминале: чекбоксы (multi) или выбор одного. Возвращает индексы. */
-export async function menu(title: string, options: string[], multi: boolean, selected: number[] = []) {
+export async function menu(
+  title: string,
+  options: string[],
+  multi: boolean,
+  selected: number[] = [],
+  /** Короткая подпись выбранного пункта для строки-итога (по умолчанию сам пункт). */
+  summary: (i: number) => string = (i) => options[i],
+) {
   const chosen = new Set(selected);
   const hint = multi
-    ? "↑↓ перемещение · Пробел отметить · a все/ничего · Enter готово · q выход"
-    : "↑↓ перемещение · Enter выбрать · q выход";
+    ? "↑↓ move · Space toggle · a all/none · Enter confirm · q quit"
+    : "↑↓ move · Enter select · q quit";
   const buf = new Uint8Array(64);
   let cur = 0, top = 0, drawn = 0, done = false, result: number[] | null = null;
 
-  const fit = (s: string, width: number) => [...s].slice(0, Math.max(1, width - 4)).join("");
+  const fit = (s: string, width: number) => [...s].slice(0, Math.max(1, width - 6)).join("");
   const draw = () => {
-    const { columns, rows } = Deno.consoleSize();
+    const { columns, rows } = terminalSize();
     const height = Math.max(1, Math.min(options.length, rows - 4));
     top = Math.min(Math.max(top, cur - height + 1), cur);
-    const lines = [`\x1b[1m${fit(title, columns)}\x1b[0m`, `\x1b[2m${fit(hint, columns)}\x1b[0m`];
+    const lines = [`${cyan("?")} ${bold(fit(title, columns))}`, `  ${dim(fit(hint, columns))}`];
     for (let i = top; i < top + height; i++) {
-      const mark = multi ? (chosen.has(i) ? "[x] " : "[ ] ") : i === cur ? "(•) " : "( ) ";
-      const text = fit(mark + options[i], columns);
-      lines.push(i === cur ? `\x1b[7m${text}\x1b[0m` : text);
+      const mark = multi ? (chosen.has(i) ? green("◉") : dim("◯")) : i === cur ? cyan("●") : dim("○");
+      const text = fit(options[i], columns);
+      lines.push(`${i === cur ? cyan("❯") : " "} ${mark} ${i === cur ? cyan(text) : text}`);
     }
-    if (options.length > height) lines.push(`\x1b[2m${cur + 1}/${options.length}\x1b[0m`);
+    if (options.length > height) lines.push(`  ${dim(`${cur + 1}/${options.length}`)}`);
     write((drawn ? `\x1b[${drawn}F` : "") + "\x1b[J" + lines.join("\r\n") + "\r\n");
     drawn = lines.length;
   };
@@ -67,12 +66,12 @@ export async function menu(title: string, options: string[], multi: boolean, sel
     Deno.stdin.setRaw(false);
   }
   if (result === null) cancel();
-  console.log(`${title}: ${result.map((i) => options[i]).join(", ")}`);
+  console.log(`${green("✔")} ${bold(title)} ${cyan(result.map(summary).join(", "))}`);
   return result;
 }
 
 export function ask(question: string, fallback = ""): string {
-  const answer = prompt(question + (fallback ? ` [${fallback}]` : "") + ":");
+  const answer = prompt(`${cyan("?")} ${bold(question)}${fallback ? dim(` (${fallback})`) : ""}`);
   if (answer === null) cancel();
   return answer.trim() || fallback;
 }

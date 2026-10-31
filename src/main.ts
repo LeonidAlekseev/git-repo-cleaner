@@ -14,57 +14,57 @@ import { parseArgs } from "@std/cli/parse-args";
 import { basename, join, resolve } from "@std/path";
 import denoJson from "../deno.json" with { type: "json" };
 import { ACTIONS, ARTIFACTS, buildRules, isEmpty, type Rules } from "./artifacts.ts";
-import { die, exists, git, isUrl } from "./git.ts";
+import { exists, git, isUrl } from "./git.ts";
 import { commitCallback, type CommitPlan, matchingPaths, planCommits, readCommits } from "./history.ts";
-import { ask, cancel, menu } from "./menu.ts";
+import { ask, menu } from "./menu.ts";
+import { bold, cancel, cyan, die, dim, field, green, header, list, plural, step, yellow } from "./ui.ts";
 
 const DEFAULT_SUFFIX = "-clean";
+const defaults = (items: { key: string; default?: boolean }[]) => items.filter((i) => i.default).map((i) => i.key);
 
-const HELP = `git-repo-cleaner ${denoJson.version} — очистка git-репозитория от артефактов AI-инструментов.
+const HELP = `${bold("git-repo-cleaner")} ${denoJson.version} — remove AI-assistant artifacts from git history.
 
-Использование: git-repo-cleaner [источник] [флаги]
-  источник                путь или URL репозитория (по умолчанию текущий)
+Usage: git-repo-cleaner [source] [options]
+  source                  repository path or URL (default: current repository)
 
-Ветки:
-  -b, --branch NAME       очищаемая ветка (можно несколько раз)
-  --all                   все ветки
-Куда класть ветки:
-  --in-place              те же имена веток (перезапись истории)
-  --suffix=SUFFIX         новые ветки <ветка><суффикс> (по умолчанию ${DEFAULT_SUFFIX})
-  --to NAME               имя новой ветки (только для одной ветки)
-Куда класть репозиторий:
-  --same-repo             в исходный репозиторий
-  --target URL|PATH       в другой репозиторий (путь создаётся, если нет)
-Что чистить:
-  --only KEYS             артефакты через запятую (по умолчанию: ${
-  ARTIFACTS.filter((a) => a.default).map((a) => a.key)
-})
-  --actions KEYS          действия через запятую (по умолчанию: ${ACTIONS.filter((a) => a.default).map((a) => a.key)})
-  --word REGEX            доп. regex упоминания (для mentions/content, можно несколько раз)
-  --path REGEX            доп. regex пути файла (можно несколько раз)
-  --author-name NAME      имя для переписанных коммитов (по умолчанию git config user.name)
-  --author-email EMAIL    почта для переписанных коммитов (по умолчанию git config user.email)
-Прочее:
-  --no-tags               не переносить теги
-  --prune                 удалить в цели ветки, которых нет в источнике (только с --all)
-  --dry-run               пробный запуск: показать, что изменится, и очистить временную копию; цель не менять
-  --no-backup             не сохранять бэкап перезаписываемых веток и тегов цели (по умолчанию сохраняется)
-  -v, --verbose           показывать списки целиком
-  -y, --yes               без подтверждения
-  -V, --version           версия
-  -h, --help              эта справка
+Branches:
+  -b, --branch NAME       branch to clean (repeatable)
+  --all                   all branches
+Branch names:
+  --in-place              keep branch names (rewrite history)
+  --suffix=SUFFIX         new branches named <branch><suffix> (default: ${DEFAULT_SUFFIX})
+  --to NAME               new branch name (single branch only)
+Destination:
+  --same-repo             push to the source repository
+  --target URL|PATH       push to another repository (a missing path is created)
+What to clean:
+  --only KEYS             comma-separated artifacts (default: ${defaults(ARTIFACTS)})
+  --actions KEYS          comma-separated actions (default: ${defaults(ACTIONS)})
+  --word REGEX            extra mention regex for mentions/content (repeatable)
+  --path REGEX            extra file path regex (repeatable)
+  --author-name NAME      name for rewritten commits (default: git config user.name)
+  --author-email EMAIL    email for rewritten commits (default: git config user.email)
+Other:
+  --no-tags               do not transfer tags
+  --prune                 delete target branches missing from the source (requires --all)
+  --dry-run               preview and clean a temporary copy; leave the target untouched
+  --no-backup             skip the backup of overwritten target refs (backup is on by default)
+  -v, --verbose           show full lists
+  -y, --yes               do not ask for confirmation
+  -V, --version           print version
+  -h, --help              show this help
 
-Артефакты: ${ARTIFACTS.map((a) => a.key).join(", ")}.
-Действия:  ${ACTIONS.map((a) => a.key).join(", ")}.`;
+Artifacts: ${ARTIFACTS.map((a) => a.key).join(", ")}
+Actions:   ${ACTIONS.map((a) => a.key).join(", ")}`;
 
 function need(interactive: boolean, flag: string) {
-  if (!interactive) die(`Нет терминала для вопроса — укажите ${flag}`);
+  if (!interactive) die(`No terminal to ask — pass ${flag}`);
 }
 
 function pickKeys(spec: string, known: string[], flag: string) {
   const keys = spec.split(",").map((k) => k.trim()).filter(Boolean);
   const unknown = keys.filter((k) => !known.includes(k));
-  if (unknown.length) die(`${flag}: неизвестные ключи ${unknown.join(", ")}`);
+  if (unknown.length) die(`${flag}: unknown keys ${unknown.join(", ")} (known: ${known.join(", ")})`);
   return keys;
 }
 
@@ -83,12 +83,18 @@ function cacheDir() {
   return join(base, "git-repo-cleaner");
 }
 
+/** Путь с ~ вместо домашнего каталога — для вывода. */
+function tilde(path: string) {
+  const home = Deno.env.get("HOME");
+  return home && path.startsWith(home + "/") ? "~" + path.slice(home.length) : path;
+}
+
 /** Источник: [location, localDir]. localDir = undefined для удалённого репозитория. */
 async function resolveSource(spec: string): Promise<[string, string | undefined]> {
   if (isUrl(spec)) return [spec, undefined];
   const path = resolve(spec);
   if (!exists(path) || !(await git(["rev-parse", "--git-dir"], { cwd: path, check: false }))) {
-    die(`${spec}: не git-репозиторий`);
+    die(`${spec}: not a git repository`);
   }
   const top = await git(["rev-parse", "--show-toplevel"], { cwd: path, check: false });
   return [path, top || path];
@@ -110,7 +116,7 @@ async function snapshotTarget(mirror: string, target: string, sameRepo: boolean)
     cwd: mirror,
     stdin: "null",
   }).output();
-  if (!out.success) die(`Не удалось прочитать цель ${target}:\n${new TextDecoder().decode(out.stderr).trim()}`);
+  if (!out.success) die(`Cannot read target ${target}:\n${new TextDecoder().decode(out.stderr).trim()}`);
   const refs = await git(["for-each-ref", "--format=%(refname)", "refs/backup"], { cwd: mirror });
   for (const ref of refs.split("\n").filter(Boolean)) result["refs/" + ref.slice("refs/backup/".length)] = ref;
   return result;
@@ -135,54 +141,55 @@ async function deliverLocal(mirror: string, target: string, dst: Set<string>, ta
     if (!dst.has(branch)) continue;
     if (top && Deno.realPathSync(path) === Deno.realPathSync(top)) {
       if (await git(["status", "--porcelain", "--untracked-files=no"], { cwd: top })) {
-        die(`Ветка ${branch} открыта в ${top} с незакоммиченными изменениями — закоммитьте или уберите их`);
+        die(`Branch ${branch} is checked out in ${top} with uncommitted changes — commit or stash them first`);
       }
       resetHere = true;
     } else {
-      die(`Ветка ${branch} открыта в другом worktree: ${path} — переключите его на другую ветку`);
+      die(`Branch ${branch} is checked out in another worktree: ${path} — switch it to another branch first`);
     }
   }
   const refspecs = ["+refs/heads/*:refs/heads/*", ...(tags ? ["+refs/tags/*:refs/tags/*"] : [])];
   await git([
     "fetch",
+    "--quiet",
     ...(prune ? ["--prune"] : []),
     ...(resetHere ? ["--update-head-ok"] : []),
     mirror,
     ...refspecs,
-  ], { cwd: target, show: true });
+  ], { cwd: target });
   if (resetHere) await git(["reset", "--hard", "--quiet"], { cwd: top });
 }
 
 async function deliverRemote(mirror: string, target: string, tags: boolean, prune: boolean) {
   const refspecs = ["+refs/heads/*:refs/heads/*", ...(tags ? ["+refs/tags/*:refs/tags/*"] : [])];
-  await git(["push", "--force", ...(prune ? ["--prune"] : []), target, ...refspecs], { cwd: mirror, show: true });
+  await git(["push", "--quiet", "--force", ...(prune ? ["--prune"] : []), target, ...refspecs], { cwd: mirror });
 }
 
-function printPreview(total: number, paths: string[], plan: CommitPlan, rules: Rules, verbose: boolean) {
+function printFindings(total: number, paths: string[], plan: CommitPlan, rules: Rules, verbose: boolean) {
   const limit = verbose ? Infinity : 15;
-  const list = (items: string[]) => {
-    for (const item of items.slice(0, limit)) console.log(`      ${item}`);
-    if (items.length > limit) console.log(`      … ещё ${items.length - limit} (--verbose — все)`);
-  };
-  console.log(`\n🔎 Найдено в истории (коммитов: ${total}):`);
+  const count = (n: number) => n ? bold(String(n)) : dim("none");
+  header(`Found in history ${dim(`· ${plural(total, "commit")}`)}`);
   if (rules.paths.length) {
-    console.log(`   файлы к удалению: ${paths.length}`);
-    list(paths);
+    field("Files", count(paths.length));
+    list(paths.map((p) => yellow(p)), limit);
   }
   if (rules.trailers.length) {
     const lines = [...plan.trailers].sort((a, b) => b[1] - a[1]);
-    console.log(`   трейлеры к удалению: ${lines.reduce((n, [, c]) => n + c, 0)}`);
-    list(lines.map(([line, count]) => `${line}  ×${count}`));
+    field("Trailers", count(lines.reduce((n, [, c]) => n + c, 0)));
+    list(lines.map(([line, n]) => `${yellow(line)}  ${dim(`×${n}`)}`), limit);
   }
-  if (rules.messageWords.length) console.log(`   сообщения с упоминаниями: ${plan.scrubbed}`);
+  if (rules.messageWords.length) field("Mentions", `${count(plan.scrubbed)} ${dim("commit messages")}`);
   if (rules.authors.length) {
-    console.log(`   авторы к замене: ${plan.authors.size}`);
-    list([...plan.authors].sort());
+    field("Authors", count(plan.authors.size));
+    list([...plan.authors].sort().map((a) => yellow(a)), limit);
   }
-  if (rules.fileWords.length) {
-    console.log(`   содержимое файлов: вырезается ${rules.fileWords.join(", ")} (без предпросмотра)`);
-  }
-  console.log(`   коммитов с новым сообщением или автором: ${plan.changes.size}`);
+  if (rules.fileWords.length) field("Contents", `${rules.fileWords.join(", ")} ${dim("(no preview)")}`);
+  field(
+    "Commits",
+    plan.changes.size
+      ? `${bold(String(plan.changes.size))} ${dim("with a new message or author")}`
+      : dim("no message or author changes"),
+  );
 }
 
 async function main() {
@@ -203,40 +210,43 @@ async function main() {
     string: ["branch", "suffix", "to", "target", "only", "actions", "word", "path", "author-name", "author-email"],
     collect: ["branch", "word", "path"],
     alias: { b: "branch", y: "yes", h: "help", v: "verbose", V: "version" },
-    unknown: (arg) => !arg.startsWith("-") || die(`Неизвестный флаг ${arg}, см. --help`),
+    unknown: (arg) => !arg.startsWith("-") || die(`Unknown option ${arg}, see --help`),
   });
   if (args.help) return console.log(HELP);
   if (args.version) return console.log(denoJson.version);
-  if (args._.length > 1) die("Укажите один источник");
+  if (args._.length > 1) die("Pass a single source repository");
   const interactive = Deno.stdin.isTerminal() && Deno.stdout.isTerminal();
   if (!(await git(["filter-repo", "--version"], { check: false }))) {
-    die("Нужен git-filter-repo: pip install git-filter-repo (или brew/apt install git-filter-repo)");
+    die("git-filter-repo is required: pipx install git-filter-repo (or brew/apt install git-filter-repo)");
   }
-  if (args.branch.length && args.all) die("--branch и --all несовместимы");
+  if (args.branch.length && args.all) die("--branch and --all are mutually exclusive");
   if ([args["in-place"], args.suffix, args.to].filter(Boolean).length > 1) {
-    die("--in-place, --suffix и --to несовместимы");
+    die("--in-place, --suffix and --to are mutually exclusive");
   }
-  if (args["same-repo"] && args.target) die("--same-repo и --target несовместимы");
+  if (args["same-repo"] && args.target) die("--same-repo and --target are mutually exclusive");
   let dryRun = args["dry-run"];
+
+  console.log(`${bold("git-repo-cleaner")} ${dim(`v${denoJson.version}`)}\n`);
 
   // Источник
   let sourceSpec = args._.length ? String(args._[0]) : "";
   if (!sourceSpec) {
     if (await git(["rev-parse", "--git-dir"], { check: false })) sourceSpec = ".";
     else {
-      need(interactive, "путь или URL репозитория");
-      sourceSpec = ask("Репозиторий (путь или URL)");
+      need(interactive, "a repository path or URL");
+      sourceSpec = ask("Repository (path or URL)");
     }
   }
   const [source, sourceDir] = await resolveSource(sourceSpec);
 
   const tmp = await Deno.makeTempDir({ prefix: "git-repo-cleaner-" });
   const mirror = join(tmp, "repo.git");
-  console.log(`🔄 Копируем ${source} ...`);
-  await git(["clone", "--mirror", "--quiet", source, mirror], { show: true });
-  const branches = (await git(["for-each-ref", "--format=%(refname:short)", "refs/heads"], { cwd: mirror }))
-    .split("\n").filter(Boolean);
-  if (!branches.length) die("В репозитории нет веток");
+  const branches = await step(`Cloned ${cyan(source)}`, async () => {
+    await git(["clone", "--mirror", "--quiet", source, mirror]);
+    return (await git(["for-each-ref", "--format=%(refname:short)", "refs/heads"], { cwd: mirror }))
+      .split("\n").filter(Boolean);
+  }, (found) => dim(`· ${plural(found.length, "branch", "branches")}`));
+  if (!branches.length) die("The repository has no branches");
   const head = await git(["symbolic-ref", "--short", "HEAD"], { cwd: mirror, check: false });
 
   // Ветки
@@ -244,12 +254,12 @@ async function main() {
   if (args.all) selected = branches;
   else if (args.branch.length) {
     const missing = args.branch.filter((b) => !branches.includes(b));
-    if (missing.length) die(`Нет веток: ${missing.join(", ")}`);
+    if (missing.length) die(`No such branches: ${missing.join(", ")}`);
     selected = args.branch;
   } else {
-    need(interactive, "--branch или --all");
+    need(interactive, "--branch or --all");
     const pre = branches.includes(head) ? [branches.indexOf(head)] : [];
-    selected = (await menu("Какие ветки очистить?", branches, true, pre)).map((i) => branches[i]);
+    selected = (await menu("Which branches to clean?", branches, true, pre)).map((i) => branches[i]);
   }
   const allBranches = branches.every((b) => selected.includes(b));
 
@@ -257,45 +267,45 @@ async function main() {
   const rename = new Map<string, string>();
   if (args["in-place"]) selected.forEach((b) => rename.set(b, b));
   else if (args.to) {
-    if (selected.length !== 1) die("--to работает только для одной ветки");
+    if (selected.length !== 1) die("--to works with a single branch only");
     rename.set(selected[0], args.to);
   } else if (args.suffix) selected.forEach((b) => rename.set(b, b + args.suffix));
   else {
-    need(interactive, "--in-place, --suffix или --to");
+    need(interactive, "--in-place, --suffix or --to");
     const one = selected.length === 1;
     const newLabel = one
-      ? `В новую ветку (${selected[0]}${DEFAULT_SUFFIX} или своё имя)`
-      : `В новые ветки с суффиксом (${DEFAULT_SUFFIX} или свой)`;
-    const [choice] = await menu("Куда положить очищенную историю?", [
+      ? `New branch (${selected[0]}${DEFAULT_SUFFIX} or a custom name)`
+      : `New branches with a suffix (${DEFAULT_SUFFIX} or custom)`;
+    const [choice] = await menu("Where to put the cleaned history?", [
       newLabel,
-      "В те же ветки (перезаписать историю)",
+      "Same branches (rewrite history)",
     ], false);
     if (choice === 1) selected.forEach((b) => rename.set(b, b));
-    else if (one) rename.set(selected[0], ask("Имя новой ветки", selected[0] + DEFAULT_SUFFIX));
+    else if (one) rename.set(selected[0], ask("New branch name", selected[0] + DEFAULT_SUFFIX));
     else {
-      const suffix = ask("Суффикс", DEFAULT_SUFFIX);
+      const suffix = ask("Suffix", DEFAULT_SUFFIX);
       selected.forEach((b) => rename.set(b, b + suffix));
     }
   }
   const dst = new Set(rename.values());
   const inPlace = [...rename].every(([s, d]) => s === d);
-  if (dst.size !== rename.size) die("Имена новых веток совпадают");
+  if (dst.size !== rename.size) die("New branch names collide");
 
   // Целевой репозиторий
   let target: string;
   if (args["same-repo"]) target = source;
   else if (args.target) target = args.target;
   else {
-    need(interactive, "--same-repo или --target");
-    const options = [`Текущий репозиторий (${source})`], targets = [source];
+    need(interactive, "--same-repo or --target");
+    const options = [`This repository (${source})`], targets = [source];
     const origin = sourceDir ? await git(["remote", "get-url", "origin"], { cwd: sourceDir, check: false }) : "";
     if (origin) {
-      options.push(`Его origin (${origin})`);
+      options.push(`Its origin (${origin})`);
       targets.push(origin);
     }
-    options.push("Другой репозиторий (URL или путь)");
-    const [choice] = await menu("В какой репозиторий отправить результат?", options, false);
-    target = choice < targets.length ? targets[choice] : ask("URL или путь");
+    options.push("Another repository (URL or path)");
+    const [choice] = await menu("Where to push the result?", options, false);
+    target = choice < targets.length ? targets[choice] : ask("URL or path");
   }
   if (!isUrl(target)) target = resolve(target);
   const sameRepo = target === source;
@@ -306,52 +316,57 @@ async function main() {
   if (args.only) picked = pickKeys(args.only, ARTIFACTS.map((a) => a.key), "--only");
   else if (asking) {
     const idx = await menu(
-      "Какие артефакты чистить?",
+      "Which artifacts to clean?",
       ARTIFACTS.map((a) => a.label),
       true,
       ARTIFACTS.flatMap((a, i) => a.default ? [i] : []),
+      (i) => ARTIFACTS[i].key,
     );
     picked = idx.map((i) => ARTIFACTS[i].key);
-  } else picked = ARTIFACTS.filter((a) => a.default).map((a) => a.key);
+  } else picked = defaults(ARTIFACTS);
   let actions: Set<string>;
   if (args.actions) actions = new Set(pickKeys(args.actions, ACTIONS.map((a) => a.key), "--actions"));
   else if (asking) {
     const idx = await menu(
-      "Что делать с найденным?",
+      "What to do with them?",
       ACTIONS.map((a) => a.label),
       true,
       ACTIONS.flatMap((a, i) => a.default ? [i] : []),
+      (i) => ACTIONS[i].key,
     );
     actions = new Set(idx.map((i) => ACTIONS[i].key));
-  } else actions = new Set(ACTIONS.filter((a) => a.default).map((a) => a.key));
+  } else actions = new Set(defaults(ACTIONS));
   const extra = { words: [...args.word], paths: [...args.path] };
   if (asking && !(extra.words.length || extra.paths.length || args.only)) {
     if (actions.has("mentions") || actions.has("content")) {
-      extra.words.push(...splitList(ask("Доп. слова-regex через запятую (Enter — нет)")));
+      extra.words.push(...splitList(ask("Extra mention regexes, comma-separated (Enter to skip)")));
     }
-    extra.paths.push(...splitList(ask("Доп. пути-regex через запятую (Enter — нет)")));
+    extra.paths.push(...splitList(ask("Extra path regexes, comma-separated (Enter to skip)")));
   }
   for (const pattern of [...extra.words, ...extra.paths]) {
     try {
       new RegExp(pattern, "i");
     } catch (e) {
-      die(`Неверный regex ${JSON.stringify(pattern)}: ${(e as Error).message}`);
+      die(`Invalid regex ${JSON.stringify(pattern)}: ${(e as Error).message}`);
     }
   }
   const rules = buildRules(ARTIFACTS.filter((a) => picked.includes(a.key)), actions, extra);
-  if (isEmpty(rules)) die("Нечего чистить: не выбраны артефакты или действия");
+  if (isEmpty(rules)) die("Nothing to clean: no artifacts or actions selected");
 
   const name = args["author-name"] || await git(["config", "user.name"], { cwd: sourceDir, check: false });
   const email = args["author-email"] || await git(["config", "user.email"], { cwd: sourceDir, check: false });
   if (rules.authors.length && !(name && email)) {
-    die("Не задан автор: укажите --author-name и --author-email или git config user.name/user.email");
+    die("Author is not set: pass --author-name and --author-email or set git config user.name/user.email");
   }
 
   const tags = allBranches && (inPlace || !sameRepo) && !args["no-tags"];
-  if (args.prune && !allBranches) die("--prune допустим только при очистке всех веток");
+  if (args.prune && !allBranches) die("--prune requires --all");
 
   // Что в цели будет перезаписано или удалено
-  const current = await snapshotTarget(mirror, target, sameRepo);
+  const current = await step(
+    sameRepo ? "Inspected target refs" : `Inspected ${cyan(target)}`,
+    () => snapshotTarget(mirror, target, sameRepo),
+  );
   const targetHeads = new Set(
     Object.keys(current).filter((r) => r.startsWith("refs/heads/")).map((r) => r.slice("refs/heads/".length)),
   );
@@ -378,37 +393,43 @@ async function main() {
 
   // Предпросмотр
   const revs = ["--branches", "--tags"];
-  const commits = await readCommits(mirror, revs);
-  const plan = planCommits(commits, rules);
-  const paths = await matchingPaths(mirror, revs, rules.paths);
-  printPreview(commits.length, paths, plan, rules, args.verbose);
+  const { commits, plan, paths } = await step("Analyzed history", async () => {
+    const commits = await readCommits(mirror, revs);
+    return { commits, plan: planCommits(commits, rules), paths: await matchingPaths(mirror, revs, rules.paths) };
+  });
+  printFindings(commits.length, paths, plan, rules, args.verbose);
 
   // Сводка
-  console.log("\n📋 План:");
-  console.log(`   источник: ${source}`);
-  console.log(`   цель:     ${target}${sameRepo ? " (тот же репозиторий)" : ""}`);
-  for (const [s, d] of rename) console.log(`   ${s} → ${d}${targetHeads.has(d) ? " ⚠️  ПЕРЕЗАПИСЬ" : ""}`);
-  if (pruned.length) console.log(`   удалятся: ${pruned.join(", ")} ⚠️  PRUNE`);
-  console.log(`   теги:     ${tags ? "да" : "нет"}`);
-  const extras = [...extra.words, ...extra.paths];
-  console.log(`   артефакты: ${picked.join(", ") || "—"}${extras.length ? ` + ${extras.join(", ")}` : ""}`);
-  console.log(`   действия:  ${ACTIONS.filter((a) => actions.has(a.key)).map((a) => a.key).join(", ")}`);
-  if (rules.authors.length) console.log(`   автор:     ${name} <${email}>`);
-  console.log(
-    "   бэкап:    " +
-      (args["no-backup"]
-        ? "выключен (--no-backup)"
-        : lost.length
-        ? `да (ссылок: ${lost.length})`
-        : "не нужен, ничего не перезаписывается"),
+  header("Plan");
+  field("Source", source);
+  field("Target", sameRepo ? dim("same repository") : target);
+  const renames = [...rename].map(([s, d]) =>
+    `${s} ${dim("→")} ${d}${targetHeads.has(d) ? `  ${yellow("⚠ overwrite")}` : ""}`
   );
+  field("Branches", renames[0]);
+  list(renames.slice(1), args.verbose ? Infinity : 15);
+  if (pruned.length) field("Prune", `${pruned.join(", ")}  ${yellow("⚠ will be deleted")}`);
+  field("Tags", tags ? "yes" : dim("no"));
+  const extras = [...extra.words, ...extra.paths];
+  field("Artifacts", `${picked.join(", ") || dim("none")}${extras.length ? ` ${dim("+")} ${extras.join(", ")}` : ""}`);
+  field("Actions", ACTIONS.filter((a) => actions.has(a.key)).map((a) => a.key).join(", "));
+  if (rules.authors.length) field("Author", `${name} <${email}>`);
+  field(
+    "Backup",
+    args["no-backup"]
+      ? yellow("disabled (--no-backup)")
+      : lost.length
+      ? `${plural(lost.length, "ref")} ${dim(`→ ${tilde(cacheDir())}/`)}`
+      : dim("not needed, nothing is overwritten"),
+  );
+  if (dryRun) field("Mode", cyan("dry run — the target stays untouched"));
+  console.log();
   if (!args.yes && !dryRun) {
-    need(interactive, "--yes или --dry-run");
-    const answer = ask("Продолжить? y — да, d — пробный запуск (dry-run), N — отмена").toLowerCase();
-    if (["d", "dry", "dry-run", "п"].includes(answer)) dryRun = true;
-    else if (!["y", "yes", "д", "да"].includes(answer)) cancel();
+    need(interactive, "--yes or --dry-run");
+    const answer = ask(`Proceed? ${dim("[y]es / [d]ry run / [N]o")}`).toLowerCase();
+    if (["d", "dry", "dry-run"].includes(answer)) dryRun = true;
+    else if (!["y", "yes"].includes(answer)) cancel();
   }
-  if (dryRun) console.log("🧪 Пробный запуск: чистим временную копию, цель и бэкапы не трогаем");
 
   // Бэкап всего, что в цели будет перезаписано или удалено
   if (lost.length && !args["no-backup"] && !dryRun) {
@@ -416,8 +437,11 @@ async function main() {
     Deno.mkdirSync(dir, { recursive: true });
     const repoName = basename(target.replace(/[/\\]+$/, "")).replace(/\.git$/, "") || "repo";
     const bundle = join(dir, `${repoName}-${timestamp()}.bundle`);
-    await git(["bundle", "create", "--quiet", bundle, ...lost.map((r) => current[r])], { cwd: mirror });
-    console.log(`💾 Бэкап: ${bundle}`);
+    await step(
+      `Backed up ${plural(lost.length, "ref")}`,
+      () => git(["bundle", "create", "--quiet", bundle, ...lost.map((r) => current[r])], { cwd: mirror }),
+      () => dim(`→ ${tilde(bundle)}`),
+    );
   }
   const backupRefs = Object.values(current);
   if (backupRefs.length) {
@@ -426,8 +450,7 @@ async function main() {
 
   // Очистка
   if (paths.length || plan.changes.size || rules.fileWords.length) {
-    console.log("🧹 Очищаем историю ...");
-    const fr = ["filter-repo", "--force"];
+    const fr = ["filter-repo", "--force", "--quiet"];
     for (const p of rules.paths) fr.push("--path-regex", `(?i)${p}`);
     if (rules.paths.length) fr.push("--invert-paths");
     if (rules.fileWords.length) {
@@ -440,30 +463,38 @@ async function main() {
       Deno.writeTextFileSync(changesFile, JSON.stringify(Object.fromEntries(plan.changes)));
       fr.push("--commit-callback", commitCallback(changesFile, name, email));
     }
-    await git(fr, { cwd: mirror, show: true });
+    await step("Rewrote history", () => git(fr, { cwd: mirror }));
 
-    console.log("🔍 Проверяем чистоту ...");
-    const leftCommits = await readCommits(mirror, ["--all"]);
-    const left = planCommits(leftCommits, rules);
-    const leftPaths = await matchingPaths(mirror, ["--all"], rules.paths);
-    if (left.changes.size || leftPaths.length) {
+    const left = await step("Verified the result", async () => {
+      const commits = planCommits(await readCommits(mirror, ["--all"]), rules);
+      const files = await matchingPaths(mirror, ["--all"], rules.paths);
+      return [...[...commits.changes.keys()].map((sha) => `commit ${sha}`), ...files.map((p) => `file ${p}`)];
+    }, (found) => found.length ? "" : dim("· no artifacts left"));
+    if (left.length) {
       die(
-        "Найдены остатки, отправка отменена:\n   " +
-          [...[...left.changes.keys()].map((sha) => `коммит ${sha}`), ...leftPaths.map((p) => `файл ${p}`)]
-            .slice(0, 50).join("\n   ") +
-          `\nКопия для разбора: ${mirror}`,
+        "Artifacts are still present, nothing was pushed:\n  " + left.slice(0, 50).join("\n  ") +
+          `\nCleaned copy for inspection: ${mirror}`,
       );
     }
   } else {
-    console.log("✨ Артефактов не найдено — ветки переносятся как есть");
+    console.log(`${green("✔")} Nothing to clean ${dim("· branches are copied as is")}`);
   }
 
-  if (dryRun) return console.log(`✅ Dry-run: очищенная копия в ${mirror}`);
-  console.log(`🚀 Отправляем в ${target} ...`);
-  if (isUrl(target)) await deliverRemote(mirror, target, tags, args.prune);
-  else await deliverLocal(mirror, target, dst, tags, args.prune);
+  if (dryRun) {
+    console.log(`\n${cyan("◆")} ${bold("Dry run complete")} ${dim("— the target was not changed")}`);
+    field("Cleaned copy", mirror);
+    field("Inspect", `git -C ${mirror} log --all --stat`);
+    return;
+  }
+  await step(
+    isUrl(target) ? `Pushed to ${cyan(target)}` : `Updated ${cyan(target)}`,
+    () =>
+      isUrl(target)
+        ? deliverRemote(mirror, target, tags, args.prune)
+        : deliverLocal(mirror, target, dst, tags, args.prune),
+  );
   await Deno.remove(tmp, { recursive: true });
-  console.log(`✅ Готово: ${[...dst].sort().join(", ")}`);
+  console.log(`\n${green("◆")} ${bold("Done")} ${dim("·")} ${[...dst].sort().join(", ")}`);
 }
 
 if (import.meta.main) await main();

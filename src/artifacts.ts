@@ -27,7 +27,7 @@ export interface Artifact {
 export const ARTIFACTS: Artifact[] = [
   {
     key: "claude",
-    label: "Claude Code (.claude/, CLAUDE.md, claudedocs/, трейлеры, автор Claude)",
+    label: "Claude Code (.claude/, CLAUDE.md, claudedocs/, trailers, Claude author)",
     paths: [
       "(^|/)\\.claude(/|$)",
       "(^|/)CLAUDE(\\.local)?\\.md$",
@@ -48,7 +48,7 @@ export const ARTIFACTS: Artifact[] = [
   },
   {
     key: "anthropic",
-    label: "Anthropic (почта @anthropic.com в авторах и трейлерах, упоминания)",
+    label: "Anthropic (@anthropic.com in authors and trailers, mentions)",
     words: ["noreply@anthropic\\.com", "anthropic"],
     authors: ["@anthropic\\.com$"],
     trailers: ["Co-authored-by:[^<]*<[^>]*@anthropic\\.com>"],
@@ -77,14 +77,14 @@ export const ARTIFACTS: Artifact[] = [
   },
   {
     key: "cursor",
-    label: "Cursor (.cursor/, .cursorrules, .cursorignore, автор Cursor Agent)",
+    label: "Cursor (.cursor/, .cursorrules, .cursorignore, Cursor Agent author)",
     paths: ["(^|/)\\.cursor(/|$)", "(^|/)\\.cursor(rules|ignore|indexingignore)$"],
     authors: ["^cursor( agent)?$", "@cursor\\.(com|sh)$"],
     trailers: ["Co-authored-by:\\s*Cursor(?: Agent)?\\s*<[^>]*>"],
   },
   {
     key: "copilot",
-    label: "GitHub Copilot (.github/copilot-instructions.md, *.prompt.md, автор Copilot)",
+    label: "GitHub Copilot (copilot-instructions.md, *.prompt.md, Copilot author)",
     paths: [
       "(^|/)\\.github/copilot-instructions\\.md$",
       "(^|/)\\.github/(instructions|prompts)/[^/]+\\.(instructions|prompt)\\.md$",
@@ -94,21 +94,21 @@ export const ARTIFACTS: Artifact[] = [
   },
   {
     key: "codex",
-    label: "OpenAI Codex (.codex/, автор Codex)",
+    label: "OpenAI Codex (.codex/, Codex author)",
     paths: ["(^|/)\\.codex(/|$)"],
     authors: ["^(openai\\s+)?codex$"],
     trailers: ["Co-authored-by:\\s*(?:OpenAI\\s+)?Codex\\b[^<]*<[^>]*>"],
   },
   {
     key: "gemini",
-    label: "Gemini (GEMINI.md, .gemini/, автор gemini-code-assist)",
+    label: "Gemini (GEMINI.md, .gemini/, gemini-code-assist author)",
     paths: ["(^|/)GEMINI\\.md$", "(^|/)\\.gemini(/|$)"],
     authors: ["^gemini-code-assist"],
     trailers: ["Co-authored-by:\\s*gemini-code-assist(?:\\[bot\\])?\\s*<[^>]*>"],
   },
   {
     key: "aider",
-    label: "Aider (.aider*, «(aider)» в имени автора)",
+    label: "Aider (.aider*, “(aider)” in author name)",
     paths: ["(^|/)\\.aider[^/]*(/|$)"],
     authors: ["\\(aider\\)$"],
     trailers: ["Co-authored-by:\\s*aider\\b[^<]*<[^>]*>"],
@@ -127,12 +127,12 @@ export interface Action {
 }
 
 export const ACTIONS: Action[] = [
-  { key: "files", label: "Удалять файлы и папки артефактов (точные имена)", default: true },
-  { key: "extended", label: "Расширенные шаблоны путей (claude-*, claude*.json, .mcp.json …)", default: false },
-  { key: "trailers", label: "Удалять трейлеры-атрибуции в конце сообщений (Co-Authored-By …)", default: true },
-  { key: "authors", label: "Переписывать авторов-ботов на ваше имя", default: true },
-  { key: "mentions", label: "Вырезать упоминания из текста сообщений коммитов", default: false },
-  { key: "content", label: "Вырезать упоминания из содержимого файлов (может сломать код)", default: false },
+  { key: "files", label: "Remove artifact files and folders (exact names)", default: true },
+  { key: "extended", label: "Extended path patterns (claude-*, claude*.json, .mcp.json …)", default: false },
+  { key: "trailers", label: "Remove attribution trailers at the end of messages (Co-Authored-By …)", default: true },
+  { key: "authors", label: "Rewrite bot authors to your name", default: true },
+  { key: "mentions", label: "Strip mentions from commit message text", default: false },
+  { key: "content", label: "Strip mentions from file contents (may break code)", default: false },
 ];
 
 export interface Rules {

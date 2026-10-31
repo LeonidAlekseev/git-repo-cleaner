@@ -1,27 +1,25 @@
 /** Запуск git и мелкие помощники для путей и URL. */
 
-export function die(msg: string): never {
-  console.error(`❌ ${msg}`);
-  Deno.exit(1);
-}
+import { die } from "./ui.ts";
 
 export interface GitOptions {
   cwd?: string;
   check?: boolean;
-  /** Выводить прогресс в терминал вместо захвата вывода. */
-  show?: boolean;
   input?: string;
 }
 
-/** Запустить git. Возвращает stdout без концевых пробелов ("" при show). */
+/**
+ * Запустить git с захватом вывода. Возвращает stdout без концевых пробелов.
+ * При ошибке (check) завершает программу с выводом git — шум успешных команд не показывается.
+ */
 export async function git(args: string[], opts: GitOptions = {}): Promise<string> {
-  const { cwd, check = true, show = false, input } = opts;
+  const { cwd, check = true, input } = opts;
   const child = new Deno.Command("git", {
     args,
     cwd,
-    stdin: input !== undefined ? "piped" : show ? "inherit" : "null",
-    stdout: show ? "inherit" : "piped",
-    stderr: show ? "inherit" : "piped",
+    stdin: input !== undefined ? "piped" : "null",
+    stdout: "piped",
+    stderr: "piped",
   }).spawn();
   if (input !== undefined) {
     const writer = child.stdin.getWriter();
@@ -29,12 +27,10 @@ export async function git(args: string[], opts: GitOptions = {}): Promise<string
     await writer.close();
   }
   const out = await child.output();
-  if (show) {
-    if (check && !out.success) die(`git ${args.join(" ")}`);
-    return "";
-  }
   const decode = (b: Uint8Array) => new TextDecoder().decode(b);
-  if (check && !out.success) die(`git ${args.join(" ")}\n${decode(out.stderr).trim()}`);
+  if (check && !out.success) {
+    die(`git ${args[0]} failed:\n${(decode(out.stderr) || decode(out.stdout)).trim()}`);
+  }
   return decode(out.stdout).trimEnd();
 }
 
