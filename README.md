@@ -4,6 +4,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/LeonidAlekseev/git-repo-cleaner)](https://github.com/LeonidAlekseev/git-repo-cleaner/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](https://github.com/LeonidAlekseev/git-repo-cleaner/releases)
 [![Deno](https://img.shields.io/badge/deno-2.x-black?logo=deno)](https://deno.com)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 Инструмент на TypeScript/Deno, который вычищает из git-репозитория следы AI-ассистентов — Claude Code, Cursor, GitHub
 Copilot, Codex, Gemini, Aider, Windsurf, OpenSpec, AGENTS.md — из файлов, сообщений коммитов и авторов, по всей истории,
@@ -28,6 +29,7 @@ Copilot, Codex, Gemini, Aider, Windsurf, OpenSpec, AGENTS.md — из файло
 - [Частые вопросы](#частые-вопросы)
 - [Разработка](#разработка)
 - [Благодарности](#благодарности)
+- [Лицензия](#лицензия)
 
 ## Обзор
 
@@ -461,3 +463,7 @@ tests/             unit- и сквозные тесты
   подход к безопасным шаблонам.
 - [git-filter-repo](https://github.com/newren/git-filter-repo) — быстрый и надёжный движок переписывания истории.
 - [Deno](https://deno.com) и [@std](https://jsr.io/@std).
+
+## Лицензия
+
+[MIT](LICENSE).
