@@ -1,0 +1,44 @@
+name: Release
+
+# Релиз: поднять version в deno.json, затем
+#   git tag v<version> && git push origin v<version>
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Версия в deno.json совпадает с тегом
+        run: test "v$(jq -r .version deno.json)" = "$GITHUB_REF_NAME"
+      - name: Сборка бинарников
+        run: |
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
+                        x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc; do
+            deno compile --allow-run=git --allow-read --allow-write --allow-env \
+              --target "$target" -o "dist/git-repo-cleaner-$target" src/main.ts
+          done
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+
+  jsr:
+    # Нужен пакет на jsr.io, связанный с этим репозиторием (Settings → GitHub repository).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno publish
